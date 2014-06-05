@@ -441,6 +441,50 @@ showErrorAndQuit:
         icall(showError)
         jp exitThread
 
+;; launchEditor [corelib]
+;;  Opens a file in the editor written in /etc/editor.
+;; Inputs:
+;;  DE: Path to file
+;; Outputs:
+;;  A: New thread ID
+;;  Z: Set on success, reset on failure
+launchEditor:
+    ; TODO: Implement this
+    or 1
+    ret
+
+;; matchesMagic [corelib]
+;;  Checks whether the given magic number matches the 
+;;  given data.
+;; Inputs:
+;;  HL: Magic number entry
+;;  DE: Pointer to file or buffer data
+;; Outputs:
+;;  Z: Set on match, reset otherwise
+matchesMagic:
+    push hl \ push de \ push bc
+        ; Offset the file data
+        ld c, (hl)
+        ld b, 0
+        ex de, hl
+        add hl, bc
+        ex de, hl
+        inc hl
+        ; Get the length of the magic number
+        ld b, (hl)
+        inc hl
+_:      ; Compare the magic numbers
+        ld c, (hl)
+        ld a, (de)
+        cp c
+        jr nz, +_
+        inc hl
+        inc de
+        djnz -_
+_:
+    pop bc \ pop de \ pop hl
+    ret
+
 ;; open [corelib]
 ;;  Opens a file with the associated application.
 ;; Inputs:
@@ -574,6 +618,10 @@ editorPath:
 
 kexcString:
     .db "KEXC", 0
+kexcMagic:
+    .db 0, 4, "KEXC", 0
+shebang:
+    .db "#!"
 
 castleSprite:
     .db 0b10101000
