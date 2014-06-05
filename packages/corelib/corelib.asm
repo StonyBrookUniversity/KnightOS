@@ -446,11 +446,70 @@ showErrorAndQuit:
 ;; Inputs:
 ;;  DE: Path to file
 ;; Outputs:
-;;  A: New thread ID
+;;  A: New thread ID on success, error on failure
 ;;  Z: Set on success, reset on failure
 launchEditor:
-    ; TODO: Implement this
-    or 1
+    ld a, i
+    push af
+        di
+        ; Copy the path into some new memory
+        ex de, hl
+        pcall(stringLength)
+        inc bc
+        pcall(malloc)
+        jr nz, .fail
+        push ix \ pop de
+        ldir
+
+        push ix
+            ; Read the editor executable from /etc/editor
+            ild(de, editorPath)
+            pcall(openFileRead)
+            jr nz, .fail
+            
+            ; Get the size of the file contents and allocate memory for it
+            pcall(getStreamInfo)
+            jr nz, .fail
+            inc bc
+            pcall(malloc)
+            jr nz, .fail
+            dec bc
+            push ix
+                add ix, bc
+                ld (ix), 0
+            pop ix
+
+            pcall(streamReadBuffer)
+            jr nz, .fail
+            pcall(closeStream)
+        push ix \ pop de \ pop hl
+
+        ; Launch the text editor
+        pcall(launchProgram)
+        ld (kernelGarbage), a
+        jr nz, .fail
+
+        ; Tell the editor the path of the text file
+        push hl \ pop ix
+        pcall(reassignMemory)
+        pcall(setInitialDE)
+        ld h, 1 ; "open file"
+        pcall(setInitialA)
+        ild(hl, open_returnPoint)
+        pcall(setReturnPoint)
+    pop af
+    ld a, (kernelGarbage)
+    ijp(po, _)
+    ei
+_:  cp a
+    ret
+
+.fail:
+    pop af
+    ld a, (kernelGarbage)
+    ijp(po, _)
+    ei
+_:  or 1
     ret
 
 ;; matchesMagic [corelib]
@@ -531,53 +590,7 @@ open:
         jr .end
 
 .notKEXC:
-        ; Else, open it with the text editor
-        ex de, hl
-
-        ; Copy HL into some new memory really quick
-        pcall(stringLength)
-        inc bc
-        pcall(malloc)
-        jr nz, .fail
-        push ix \ pop de
-        ldir
-
-        push ix
-            ; Read the editor executable from /etc/editor
-            ild(de, editorPath)
-            pcall(openFileRead)
-            jr nz, .fail
-            
-            ; Get the size of the file contents and allocate memory for it
-            pcall(getStreamInfo)
-            jr nz, .fail
-            inc bc
-            pcall(malloc)
-            jr nz, .fail
-            dec bc
-            push ix
-                add ix, bc
-                ld (ix), 0
-            pop ix
-
-            pcall(streamReadBuffer)
-            jr nz, .fail
-            pcall(closeStream)
-        push ix \ pop de \ pop hl
-
-        ; Launch the text editor
-        pcall(launchProgram)
-        ld (kernelGarbage), a
-        jr nz, .fail
-
-        ; Tell the editor the path of the text file
-        push hl \ pop ix
-        pcall(reassignMemory)
-        pcall(setInitialDE)
-        ld h, 1 ; "open file"
-        pcall(setInitialA)
-        ild(hl, open_returnPoint)
-        pcall(setReturnPoint)
+        pcall(launchTextEditor)
 
         jr .end
 
