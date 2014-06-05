@@ -450,14 +450,14 @@ showErrorAndQuit:
 ;;  Z: Set on success, reset on failure
 launchEditor:
     ld a, i
-    push af
+    push de \ push hl \ push bc \ push ix \ push af
         di
         ; Copy the path into some new memory
         ex de, hl
         pcall(stringLength)
         inc bc
         pcall(malloc)
-        jr nz, .fail
+        jr nz, .end
         push ix \ pop de
         ldir
 
@@ -465,14 +465,14 @@ launchEditor:
             ; Read the editor executable from /etc/editor
             ild(de, editorPath)
             pcall(openFileRead)
-            jr nz, .fail
+            jr nz, .end
             
             ; Get the size of the file contents and allocate memory for it
             pcall(getStreamInfo)
-            jr nz, .fail
+            jr nz, .end
             inc bc
             pcall(malloc)
-            jr nz, .fail
+            jr nz, .end
             dec bc
             push ix
                 add ix, bc
@@ -480,14 +480,16 @@ launchEditor:
             pop ix
 
             pcall(streamReadBuffer)
-            jr nz, .fail
+            jr nz, .end
             pcall(closeStream)
         push ix \ pop de \ pop hl
 
         ; Launch the text editor
         pcall(launchProgram)
-        ld (kernelGarbage), a
-        jr nz, .fail
+        ld ix, 0
+        add ix, sp
+        ld (ix), a
+        jr nz, .end
 
         ; Tell the editor the path of the text file
         push hl \ pop ix
@@ -497,20 +499,12 @@ launchEditor:
         pcall(setInitialA)
         ild(hl, open_returnPoint)
         pcall(setReturnPoint)
-    pop af
-    ld a, (kernelGarbage)
-    ijp(po, _)
-    ei
-_:  cp a
-    ret
 
-.fail:
-    pop af
-    ld a, (kernelGarbage)
+.end:
+    pop af \ pop ix \ pop bc \ pop hl \ pop de
     ijp(po, _)
     ei
-_:  or 1
-    ret
+_:  ret
 
 ;; matchesMagic [corelib]
 ;;  Checks whether the given magic number matches the 
@@ -590,8 +584,8 @@ open:
         jr .end
 
 .notKEXC:
-        pcall(launchTextEditor)
-
+        icall(launchEditor)
+        ld a, (kernelGarbage)
         jr .end
 
 .fail:
