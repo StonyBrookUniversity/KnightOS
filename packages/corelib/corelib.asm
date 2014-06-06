@@ -551,7 +551,7 @@ _:
 ;;  opens it with /etc/editor. If all of that fails, it returns NZ.
 open:
     ld a, i
-    push af
+    push ix \ push bc \ push de \ push hl \ push af
         di
         ; Check for KEXC
         push de
@@ -577,7 +577,9 @@ open:
         ; If the file is a KEXC, directly launch it
         jr nz, .notKEXC
         pcall(launchProgram)
-        ld (kernelGarbage), a
+        ld ix, 0
+        add ix, sp
+        ld (ix), a
         jr nz, .fail
         ild(hl, open_returnPoint)
         pcall(setReturnPoint)
@@ -585,20 +587,20 @@ open:
 
 .notKEXC:
         icall(launchEditor)
-        ld a, (kernelGarbage)
+        ld ix, 0
+        add ix, sp
+        ld (ix), a
         jr .end
 
 .fail:
-    pop af
-    ld a, (kernelGarbage)
+    pop af \ pop hl \ pop de \ pop bc \ pop ix
     ijp(po, _)
     ei
 _:  or 1
     ret
 
 .end:
-    pop af
-    ld a, (kernelGarbage)
+    pop af \ pop hl \ pop de \ pop bc \ pop ix
     ijp(po, _)
     ei
 _:  cp a
