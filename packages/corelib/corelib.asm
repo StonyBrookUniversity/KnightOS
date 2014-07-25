@@ -628,7 +628,8 @@ editorPath:
 kexcString:
     .db "KEXC", 0
 kexcMagic:
-    .db 0, 4, "KEXC", 0
+    .db 0, 4
+    .db "KEXC", 0
 shebang:
     .db "#!"
 
