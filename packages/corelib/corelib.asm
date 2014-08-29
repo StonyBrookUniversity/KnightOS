@@ -28,6 +28,7 @@ jumpTable:
     jp showError
     jp showErrorAndQuit
     jp open
+    jp drawScrollBar
     .db 0xFF
 
 ; Same as kernel getKey, but listens for
@@ -140,6 +141,38 @@ _:      pop af \ pop hl \ push hl \ push af
     pop hl
     pop bc
     pop de
+    ret
+
+;; drawScrollBar
+;; Inputs:
+;;  B: Length of bar in pixels
+;;  C: Position of top of bar (0-49)
+;;  IY: Screen Buffer
+drawScrollBar:
+    push af
+    push hl
+        push bc
+            ; Draw left side
+            ld a, 94
+            ld l, 7
+            ld c, 49
+            pcall(drawVLine)
+            ; Clear right side
+            ld a, 95
+            pcall(drawVLineAND)
+        ; Draw bar
+        pop bc
+        ; Set Y
+        ld a, 7
+        add c
+        ld l, a
+        ; Set X
+        ld a, 95
+        ; Set length
+        ld c, b
+        pcall(drawVLine)
+    pop hl
+    pop af
     ret
 
 ;; showMessage [corelib]
@@ -556,15 +589,15 @@ open:
         ; Check for KEXC
         push de
             pcall(openFileRead)
-            jr nz, .fail
+            ijp(nz, .fail)
 
             ld bc, 5
             pcall(malloc)
-            jr nz, .fail
+            ijp(nz, .fail)
 
             dec bc
             pcall(streamReadBuffer)
-            jr nz, .fail
+            ijp(nz, .fail)
             pcall(closeStream)
 
             ld (ix + 4), 0

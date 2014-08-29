@@ -84,14 +84,16 @@ TI84pCSE: EXPLOIT_ADDRESS_FAT := 4046848
 TI84pCSE: EXPLOIT_ADDRESS_FAT_BACKUP := 3850240
 TI84pCSE: userland
 
+SKIPON:=NO
+
 AS=sass
 EMU=wabbitemu
 ASFLAGS=--encoding "Windows-1252"
-INCLUDE=inc/;kernel/bin/$(PLATFORM);temp/include/;
+INCLUDE=kernel/bin;temp/include/;
 .DEFAULT_GOAL=TI84pSE
 
 PACKAGE_AS=sass
-PACKAGE_INCLUDE=$(PKGREL)inc/;$(PKGREL)kernel/bin/$(PLATFORM);
+PACKAGE_INCLUDE=$(PKGREL)inc/;$(PKGREL)kernel/bin/;
 
 .PHONY: kernel userland run runcolor buildpkgs license directories clean %.package exploit \
 	TI73 TI83p TI83pSE TI84p TI84pSE TI84pCSE
@@ -103,8 +105,7 @@ runcolor: TI84pCSE
 	$(EMU) bin/TI84pCSE/KnightOS-TI84pCSE.rom
 
 kernel: directories
-	cd kernel && make $(PLATFORM)
-	cp kernel/bin/$(PLATFORM)/kernel.inc temp/include/kernel.inc
+	cd kernel && make $(PLATFORM) SKIPON=$(SKIPON)
 
 exploit:
 	if [ $(EXPLOIT) -eq 1 ]; then\
@@ -130,7 +131,7 @@ endif
 				bin/$(PLATFORM)/KnightOS-$(PLATFORM).$(UPGRADEEXT) 00 01 02 03 04 05 06 $(PRIVEDGED) $(EXPLOIT_PAGES);\
 		rm temp.rom;\
 	else\
-		mktiupgrade -p -d $(DEVICE) -k kernel/keys/$(KEY).key bin/$(PLATFORM)/KnightOS-$(PLATFORM).rom \
+		mktiupgrade -p -d $(DEVICE) -k kernel/keys/$(KEY).key -n $(KEY) bin/$(PLATFORM)/KnightOS-$(PLATFORM).rom \
 			bin/$(PLATFORM)/KnightOS-$(PLATFORM).$(UPGRADEEXT) 00 01 02 03 04 05 06 $(FAT) $(PRIVEDGED);\
 	fi
 
@@ -155,8 +156,6 @@ directories:
 	mkdir -p temp/etc
 	echo -e '\x00\x04KIMG/bin/imgview' > temp/etc/magic
 	mkdir -p temp/home
-	mkdir -p temp/var/foo/bar
-	echo "Hi there" > temp/var/foo/bar/foobar
 	mkdir -p temp/lib
 	mkdir -p temp/share
 	mkdir -p temp/include
