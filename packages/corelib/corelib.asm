@@ -586,6 +586,32 @@ open:
         jr .end
 
 .notKEXC:
+        ; Check if it matches a magic number
+        push de
+            ; Open the magic number file
+            ild(de, magicPath)
+            pcall(openFileRead)
+            jr nz, .fail
+
+            ; Read two bytes (position and length)
+            pcall(streamReadWord)
+
+            ; Allocate memory for the magic number
+            ld c, h \ ld b, 0
+            inc c \ inc c
+            pcall(malloc)
+
+            ; Read the magic number
+            ld (ix), l \ inc ix
+            ld (ix), h \ inc ix
+            ld b, h \ ld c, l
+            pcall(streamReadBuffer)
+
+        pop de
+        ; Compare it
+        ld h, ixh \ ld l, ixl
+        icall(matchesMagic)
+
         icall(launchEditor)
         ld ix, 0
         add ix, sp

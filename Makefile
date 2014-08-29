@@ -153,6 +153,7 @@ directories:
 	mkdir -p temp
 	mkdir -p temp/bin
 	mkdir -p temp/etc
+	echo -e '\x00\x04KIMG/bin/imgview' > temp/etc/magic
 	mkdir -p temp/home
 	mkdir -p temp/var/foo/bar
 	echo "Hi there" > temp/var/foo/bar/foobar
