@@ -1,5 +1,6 @@
 #include "kernel.inc"
 #include "corelib.inc"
+#include "config.inc"
     .db "KEXC"
     .db KEXC_ENTRY_POINT
     .dw start
@@ -8,59 +9,97 @@
     .db KEXC_KERNEL_VER
     .db 0, 6
     .db KEXC_NAME
-name_ptr:
-    .dw titlePrefix
+    .dw window_title
     .db KEXC_HEADER_END
+window_title:
+    .db "File Manager", 0
 start:
     pcall(getLcdLock)
     pcall(getKeypadLock)
 
     kld(de, corelibPath)
     pcall(loadLibrary)
+    kld(de, configlibPath)
+    pcall(loadLibrary)
+
+    kcall(loadConfiguration)
 
     pcall(allocScreenBuffer)
+    pcall(clearBuffer)
 
     ; Set current path
-    ld bc, 1024 + (titlePrefixEnd - titlePrefix)
+    ld bc, 512
     pcall(malloc)
     push ix \ pop de
-    kld(hl, titlePrefix)
-    ld bc, titlePrefixEnd - titlePrefix
-    ldir
+    push de
+        kld(hl, (config_initialPath))
+        pcall(strlen)
+        inc bc
+        ldir
+        dec de \ dec de
+        ex de, hl
+        ld a, '/'
+        cp (hl)
+        jr z, _
+        inc hl
+        ld (hl), a
+        xor a
+        inc hl
+        ld (hl), a
+_:      ex de, hl
+    pop de
     ex de, hl
-    ld a, '/'
-    ld bc, 0
-    cpdr \ cpdr ; Note: this prevents us from having / be the initial path
-    inc hl
     kld((currentPath), hl)
-    push ix \ pop hl
+    ;pcall(directoryExists) ; TODO: Fix trailing slashes in directoryExists
+    cp a
+    jr z, _
+    ; Move us back to / cause this doesn't exist
+    ld a, '/'
+    ld (hl), a
+    inc hl
+    xor a
+    ld (hl), a
+    dec hl
     push hl
-        pcall(getCurrentThreadId)
-        pcall(getEntryPoint)
-        ld b, h \ ld c, l
+    push de
+        xor a
+        ld b, a
+        kld(hl, startNotFound)
+        kld(de, openFailOptions)
+        corelib(showMessage)
+    pop de
     pop hl
-    or a
-    sbc hl, bc
-    kld((name_ptr), hl)
 
-    ; Allocate space for fileList and directoryList
+_:  ; Allocate space for fileList and directoryList
     ld bc, 512 ; Max 256 subdirectories and 256 files per directory
     pcall(malloc)
+    corelib(showErrorAndQuit)
     push ix \ pop hl
     kld((fileList), hl)
     pcall(malloc)
+    corelib(showErrorAndQuit)
     push ix \ pop hl
     kld((directoryList), hl)
 
 doListing:
+    kld(a, (config_browseRoot))
+    or a
+    jr nz, _
     kld(hl, (currentPath))
+    kld(de, (config_initialPath))
+    pcall(strcmp)
+    jr z, +++_
+
+_:  kld(hl, (currentPath))
     inc hl
     ld a, (hl)
     dec hl
     or a ; cp 0 (basically, test if we're at the root
-    jr z, _
+    jr z, ++_
 
-    ; Add a .. entry if this is not the root
+_:  ; Add a .. entry if this is not the root
+    kld(hl, directoryIcon)
+    kld((dotdot), hl)
     kld(hl, (directoryList))
     kld(de, dotdot)
     ld (hl), e
@@ -82,30 +121,32 @@ _:  kld(hl, (currentPath))
     pop bc
     ; B: Num directories
     ; C: Num files
-    ; Sort results
-    kld(hl, (currentPath))
-    inc hl
-    ld a, (hl)
-    or a
-    jr z, _ 
-    inc b ; Add the imaginary '..' entry
-_:  push bc
-        ld a, b
-        or a
-        jr z, ++_
+    ; Add the imaginary .. entry to the list
+    push de
         kld(ix, (directoryList))
         pcall(memSeekToStart)
         kld((directoryList), ix)
+        ld l, (ix)
+        ld h, (ix + 1)
+        kld(de, dotdot)
+        pcall(cpHLDE)
+    pop de
+    jr nz, _ 
+    inc b
+_:  push bc ; Sort results
+        ld a, b
+        or a
+        jr z, ++_
         ld a, b
         ld b, 0
         ld c, a
         ; Check for root and move past the .. if not
-        kld(hl, (currentPath))
-        inc hl
-        ld a, (hl)
+        ld l, (ix)
+        ld h, (ix + 1)
+        kld(de, dotdot)
+        pcall(cpHLDE)
         push ix \ pop hl
-        or a ; cp 0
-        jr z, _
+        jr nz, _
         ; We are not on the root, so skip the .. entry for sorting
         inc hl \ inc hl
         dec bc
@@ -115,10 +156,7 @@ _:      ld d, h \ ld e, l
         ex hl, de
         dec de \ dec de
         ld bc, 2
-        ; This is weird. We know this pcall is on page 0x00, so this
-        ; just takes it apart and gets the address in the jump table
-        ; directly so that we can offer it to callbackSort
-        ld ix, 0x4000 - (((compareStrings_sort >> 8) + 1) * 3)
+        kld(ix, sort_callback)
         pcall(callbackSort) ; Sort directory list
     pop bc \ push bc
         ld a, c
@@ -135,7 +173,7 @@ _:      ld d, h \ ld e, l
         ex hl, de
         dec de \ dec de
         ld bc, 2
-        ld ix, 0x4000 - (((compareStrings_sort >> 8) + 1) * 3)
+        kld(ix, sort_callback)
         pcall(callbackSort) ; Sort file list
 _:  pop bc
     ld a, b
@@ -146,18 +184,20 @@ _:  pop bc
 drawList:
     pcall(clearBuffer)
     kld(hl, (currentPath))
-    push hl \ pop ix
-    pcall(memSeekToStart)
-    push ix \ pop hl
     ld a, 0b00000100
-    push bc
-        ld bc, initialPath - titlePrefix
-        or a
-        add hl, bc
-    pop bc
     corelib(drawWindow)
+    xor a
+    cp b
+    jr nz, _
+    cp c
+    jr nz, _
+    ; There are no files or folders here
+    ld de, 0x0208
+    kld(hl, nothingHereText)
+    pcall(drawStr)
+    kjp(.done)
 
-    ld de, 0x0808
+_:  ld de, 0x0808
     kld(a, (scrollTop))
     ld h, a
     push bc
@@ -213,33 +253,43 @@ _:  pop af
 _:  pop af
     ld l, (ix)
     ld h, (ix + 1)
+    inc hl
+    inc hl
     pcall(drawStr)
     push bc
         or a
         jr z, _
-        ; File size
-        pcall(stringLength)
-        or a
-        adc hl, bc
-        inc hl
-        push af
-            push de
-                ld e, (hl)
-                inc hl
-                ld d, (hl)
-                inc hl
-                ld a, (hl)
-                ex de, hl
-            pop de
-            kcall(drawFileSize)
-        pop af
-_:      ld b, 6
+        kld(a, (config_showSize))
         or a
         jr z, _
-        kld(hl, fileIcon)
-        jr ++_
-_:      kld(hl, directoryIcon)
-_:      ld d, 2
+        ; File size
+        pcall(strlen)
+        or a
+        push hl
+            adc hl, bc
+            inc hl
+            push af
+                push de
+                    ld e, (hl)
+                    inc hl
+                    ld d, (hl)
+                    inc hl
+                    ld a, (hl)
+                    ex de, hl
+                pop de
+                cp 0xFF ; TODO: Check all of AHL
+                kcall(nz, drawFileSize)
+            pop af
+        pop hl
+_:      ld b, 6
+        push de
+            dec hl \ dec hl
+            ld e, (hl)
+            inc hl
+            ld d, (hl)
+            ex de, hl
+        pop de
+        ld d, 2
         pcall(putSpriteOR)
         ld d, 8
         ld b, 8
@@ -258,6 +308,9 @@ _:      ld d, 2
         jr nc, $+3
         inc b
         push bc
+            ld hl, 0
+            pcall(cpHLBC)
+            jr z, idleLoop
 
             ; Draw remainder of UI
             kld(a, (scrollTop))
@@ -292,6 +345,12 @@ idleLoop:
             corelib(appWaitKey)
             jr nz, idleLoop
 
+            cp kMode
+            kjp(z, .exit)
+            ld hl, 0
+            pcall(cpHLBC)
+            jr z, idleLoop
+
             cp kDown
             kjp(z, .handleDown)
             cp kUp
@@ -308,8 +367,6 @@ idleLoop:
             kjp(z, .handleEnter)
             cp kDel
             kjp(z, .handleDelete)
-            cp kMode
-            kjp(z, .exit)
             jr idleLoop
 .handleDown:
         pop bc
@@ -406,6 +463,7 @@ idleLoop:
     ld e, (hl)
     inc hl
     ld d, (hl)
+    inc de \ inc de ; Skip icon
     ld a, (de)
     cp '.'
     kjp(z, .handleParent_noPop)
@@ -415,7 +473,7 @@ idleLoop:
     cpir
     dec hl
     ex de, hl
-    pcall(stringLength)
+    pcall(strlen)
     inc bc
     ldir
     ex de, hl
@@ -456,19 +514,20 @@ idleLoop:
     ld e, (hl)
     inc hl
     ld d, (hl)
+    inc de \ inc de
     kld(hl, (currentPath))
     xor a
     ld bc, 0
     cpir
     dec hl
     ex de, hl
-    pcall(stringLength)
+    pcall(strlen)
     inc bc
     ldir
     kld(de, (currentPath))
     pcall(deleteFile)
     ex de, hl
-    pcall(stringLength)
+    pcall(strlen)
     add hl, bc
     ld a, '/'
     cpdr
@@ -489,7 +548,7 @@ idleLoop:
 .handleParent_noPop:
     kld(hl, (currentPath))
     push hl \ pop de
-    pcall(stringLength)
+    pcall(strlen)
     add hl, bc
     ld a, '/'
     ld bc, 0
@@ -548,6 +607,7 @@ openFile:
     ld e, (hl)
     inc hl
     ld d, (hl)
+    inc de \ inc de
     ; Copy DE into the current path, but not for long
     kld(hl, (currentPath))
     xor a
@@ -557,7 +617,7 @@ openFile:
     di
     push hl
         ex de, hl
-        pcall(stringLength)
+        pcall(strlen)
         inc bc
         ldir
         kld(de, (currentPath))
@@ -625,14 +685,26 @@ listCallback:
     pop hl
         push bc
             cp fsFile
-            jr z, _
+            jr z, .handleFile
+            cp fsSymLink
+            kjp(z, .handleLink)
+            cp fsDirectory
+            kjp(nz, .handleUnknown)
 
             ; Handle directory
             ld hl, kernelGarbage
-            pcall(stringLength)
-            inc bc ; Include delimiter
+            kld(a, (config_showHidden))
+            or a
+            jr nz, _
+            ld a, (hl)
+            cp '.'
+            kjp(z, .handleUnknown) ; Skip hidden directory
+_:          pcall(strlen)
+            inc bc \ inc bc \ inc bc ; Include delimiter and icon
             pcall(malloc) ; TODO: Handle out of memory (how?)
-            push ix \ pop de
+            kld(de, directoryIcon)
+            ld (ix), e \ ld (ix + 1), d
+            push ix \ pop de \ inc de \ inc de
             ldir
 
             kld(hl, (directoryList))
@@ -642,19 +714,29 @@ listCallback:
             ld (hl), d
             inc hl
             kld((directoryList), hl)
-        pop bc
+            pop bc
         inc b
     exx
     ret
-_:          ; Handle file
+.handleFile:
             push hl
                 ld hl, kernelGarbage
-                pcall(stringLength)
-                ld a, 4
-                add c \ ld c, a \ jr nc, $+3 \ inc b ; Add delimter, file size
+                kld(a, (config_showHidden))
+                or a
+                jr nz, _
+                ld a, (hl)
+                cp '.'
+                jr nz, _
+            pop hl
+            kjp(.handleUnknown) ; Skip hidden file
+_:              pcall(strlen)
+                ld a, 6
+                add c \ ld c, a \ jr nc, $+3 \ inc b ; Add delimter, file size, icon
                 pcall(malloc) ; TODO: Handle out of memory (how?)
-                push ix \ pop de
-                dec bc \ dec bc \ dec bc
+                kld(de, fileIcon)
+                ld (ix), e \ ld (ix + 1), d
+                push ix \ pop de \ inc de \ inc de
+                dec bc \ dec bc \ dec bc \ dec bc \ dec bc
                 ldir
             pop hl
             ; File size
@@ -681,6 +763,53 @@ _:          ; Handle file
         inc c
     exx
     ret
+.handleLink:
+_:          push hl
+                ld hl, kernelGarbage
+                ld hl, kernelGarbage
+                kld(a, (config_showHidden))
+                or a
+                jr nz, _
+                ld a, (hl)
+                cp '.'
+                jr nz, _
+            pop hl
+            kjp(.handleUnknown) ; Skip hidden file
+_:              pcall(strlen)
+                ld a, 6
+                add c \ ld c, a \ jr nc, $+3 \ inc b ; Add delimter, file size, icon
+                pcall(malloc) ; TODO: Handle out of memory (how?)
+                kld(de, symlinkIcon)
+                ld (ix), e \ ld (ix + 1), d
+                push ix \ pop de \ inc de \ inc de
+                dec bc \ dec bc \ dec bc \ dec bc \ dec bc
+                ldir
+            pop hl
+            ; File size
+            ; Symlinks need to be sorted with files so there's some workarounds
+            ; One of these is that the file size is set to 0xFFFFF
+            ld a, 0xFF
+            ld (de), a
+            inc de
+            ld (de), a
+            inc de
+            ld (de), a
+
+            kld(hl, (fileList))
+            push ix \ pop de
+            ld (hl), e
+            inc hl
+            ld (hl), d
+            inc hl
+            kld((fileList), hl)
+        pop bc
+        inc c
+    exx
+    ret
+.handleUnknown:
+        pop bc
+    exx
+    ret
 
 trampoline:
     ld a, 0 ; Thread ID will be loaded here
@@ -692,6 +821,82 @@ trampoline:
     pcall(killCurrentThread)
 trampoline_end:
 
+sort_callback:
+    push de
+    push hl
+        pcall(indirect16HLDE)
+        inc hl \ inc hl
+        inc de \ inc de
+        pcall(strcmp)
+    pop hl
+    pop de
+    ret
+
+loadConfiguration:
+    ; Set defaults
+    kld(hl, initialPath)
+    kld((config_initialPath), hl)
+    ; Load actual
+    kld(de, configPath)
+    config(openConfigRead)
+    ret nz
+
+    kld(hl, config_browseRoot_s)
+    config(readOption_bool)
+    jr nz, _
+    kld((config_browseRoot), a)
+
+_:  kld(hl, config_editSymLinks_s)
+    config(readOption_bool)
+    jr nz, _
+    kld((config_editSymLinks), a)
+    
+_:  kld(hl, config_showHidden_s)
+    config(readOption_bool)
+    jr nz, _
+    kld((config_showHidden), a)
+    
+_:  kld(hl, config_showSize_s)
+    config(readOption_bool)
+    jr nz, _
+    kld((config_showSize), a)
+
+    kld(hl, config_initialPath)
+_:  kld(hl, config_initialPath_s)
+    config(readOption)
+    jr nz, _
+    kld((config_initialPath), hl)
+
+_:  config(closeConfig)
+    ret
+
+; Config options
+config_initialPath:
+    .dw initialPath
+config_browseRoot:
+    .db 0
+config_editSymLinks:
+    .db 0
+config_showHidden:
+    .db 0
+config_showSize:
+    .db 0
+
+config_initialPath_s:
+    .db "startdir", 0
+config_browseRoot_s:
+    .db "browseroot", 0
+config_editSymLinks_s:
+    .db "editsymlinks", 0
+config_showHidden_s:
+    .db "showhidden", 0
+config_showSize_s:
+    .db "showsize", 0
+
+configPath:
+    .db "/etc/fileman.conf", 0
+
+; Variables
 currentPath:
     .dw 0
 fileList:
@@ -709,15 +914,15 @@ scrollTop:
 
 corelibPath:
     .db "/lib/core", 0
+configlibPath:
+    .db "/lib/config", 0
 upText:
     .db "..\n", 0
 dotdot:
+    .dw 0
     .db "..", 0
-titlePrefix:
-    .db "File Manager: "
 initialPath:
     .db "/home/", 0
-titlePrefixEnd:
 directoryIcon:
     .db 0b11100000
     .db 0b10011000
@@ -732,6 +937,13 @@ fileIcon:
     .db 0b10001000
     .db 0b11111000
     .db 0
+symlinkIcon:
+    .db 0b00100000
+    .db 0b00110000
+    .db 0b01111000
+    .db 0b10110000
+    .db 0b00100000
+    .db 0
 downCaretIcon:
     .db 0b11111000
     .db 0b01110000
@@ -740,6 +952,8 @@ upCaretIcon:
     .db 0b00100000
     .db 0b01110000
     .db 0b11111000
+nothingHereText:
+    .db "Nothing here!", 0
 deletionMessage:
     .db "Are you sure\nyou want to\ndelete this?", 0
 deletionOptions:
@@ -751,6 +965,8 @@ openFailMessage:
 openFailOptions:
     .db 1
     .db "Dismiss", 0
+startNotFound:
+    .db "Start-up\ndirectory not\nfound.", 0
 
 ; Settings
 showHidden:

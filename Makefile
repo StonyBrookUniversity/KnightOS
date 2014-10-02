@@ -84,35 +84,34 @@ TI84pCSE: EXPLOIT_ADDRESS_FAT := 4046848
 TI84pCSE: EXPLOIT_ADDRESS_FAT_BACKUP := 3850240
 TI84pCSE: userland
 
-SKIPON:=NO
-
-AS=sass
-EMU=wabbitemu
-ASFLAGS=--encoding "Windows-1252"
-INCLUDE=kernel/bin;temp/include/;
+AS:=sass
+EMU:=wabbitemu
+EMUFLAGS:=
+ASFLAGS:=--encoding "Windows-1252"
+INCLUDE:=kernel/bin;temp/include/;
 .DEFAULT_GOAL=TI84pSE
 
-PACKAGE_AS=sass
-PACKAGE_INCLUDE=$(PKGREL)inc/;$(PKGREL)kernel/bin/;
+PACKAGE_AS:=sass
+PACKAGE_INCLUDE:=$(PKGREL)inc/;$(PKGREL)kernel/bin/;
 
-.PHONY: kernel userland run runcolor buildpkgs license directories clean %.package exploit \
+.PHONY: kernel userland run runcolor buildpkgs license directories clean %.package exploit castle_links \
 	TI73 TI83p TI83pSE TI84p TI84pSE TI84pCSE
 
 run: TI84pSE
-	$(EMU) bin/TI84pSE/KnightOS-TI84pSE.rom
+	$(EMU) $(EMUFLAGS) bin/TI84pSE/KnightOS-TI84pSE.rom
 
 runcolor: TI84pCSE
-	$(EMU) bin/TI84pCSE/KnightOS-TI84pCSE.rom
+	$(EMU) $(EMUFLAGS) bin/TI84pCSE/KnightOS-TI84pCSE.rom
 
 kernel: directories
-	cd kernel && make $(PLATFORM) SKIPON=$(SKIPON)
+	cd kernel && make $(PLATFORM)
 
 exploit:
 	if [ $(EXPLOIT) -eq 1 ]; then\
 		$(AS) $(ASFLAGS) --include "$(INCLUDE)" --define "$(PLATFORM)" exploit/exploit.asm bin/exploit.bin;\
 	fi
 
-userland: kernel directories buildpkgs license exploit
+userland: kernel directories buildpkgs license exploit castle_links
 	cp kernel/bin/$(PLATFORM)/kernel.rom bin/$(PLATFORM)/KnightOS-$(PLATFORM).rom
 	git describe --dirty=+ > temp/etc/version
 	genkfs bin/$(PLATFORM)/KnightOS-$(PLATFORM).rom temp
@@ -140,13 +139,14 @@ endif
 	make AS="$(PACKAGE_AS)" ASFLAGS="$(ASFLAGS)" PLATFORM="$(PLATFORM)" INCLUDE="$(PACKAGE_INCLUDE)" \
 				PACKAGEPATH="$(PACKAGEPATH)";
 	@cd $<; \
-	cp -r bin/* "$(PKGREL)temp";
+	make PREFIX=$(PKGREL)temp install || cp -r bin/* "$(PKGREL)temp";
 
 buildpkgs: directories $(PACKBUF)
 
 license: directories
 	mkdir -p temp/etc/
 	cp LICENSE temp/etc/LICENSE
+	cp THANKS temp/etc/THANKS
 
 directories:
 	mkdir -p bin/$(PLATFORM)
@@ -158,8 +158,17 @@ directories:
 	mkdir -p temp/home
 	mkdir -p temp/lib
 	mkdir -p temp/share
-	mkdir -p temp/include
 	mkdir -p temp/var
+
+castle_links:
+	mkdir -p temp/var/castle/
+	ln -s /var/applications/fileman.app temp/var/castle/pin-0
+	ln -s /var/applications/gfxdemo.app temp/var/castle/pin-1
+	ln -s /var/applications/hello.app temp/var/castle/pin-2
+	ln -s /var/applications/count.app temp/var/castle/pin-3
+	ln -s /var/applications/settings.app temp/var/castle/pin-4
+	ln -s /var/applications/phoenix.app temp/var/castle/pin-5
+	echo -ne "icon=/share/icons/copyright.kio\nname=License\nexec=/etc/LICENSE" > temp/var/castle/pin-9
 
 clean:
 	@for f in $(PACKAGES) ; do \
