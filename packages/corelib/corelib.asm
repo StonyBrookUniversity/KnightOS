@@ -487,7 +487,7 @@ launchEditor:
         di
         ; Copy the path into some new memory
         ex de, hl
-        pcall(stringLength)
+        pcall(strlen)
         inc bc
         pcall(malloc)
         jr nz, .end
